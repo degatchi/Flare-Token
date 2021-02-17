@@ -9,10 +9,10 @@ interface ERC20 {
     function approve(address _spender, uint _amount) external returns (bool success);
     function transferFrom(address _from, address _to, uint _amount) external returns (bool success);
 
-// Are optional 
-     function symbol() external view returns (string memory);
-     function name() external view returns (string memory);
-     function decimals() external view returns (uint8);
+// // Are optional 
+//      function symbol() external view returns (string memory);
+//      function name() external view returns (string memory);
+//      function decimals() external view returns (uint8);
 
     event Transfer(address indexed from, address indexed to, uint tokens);
     event Approval(address indexed tokenOwner, address indexed spender, uint tokens);
@@ -77,7 +77,7 @@ library SafeMath {
     }
 }
 
-abstract contract FlareToken is ERC20 {
+contract FlareToken is ERC20 {
     using SafeMath for uint256;
 
 	string private _name = "Flare Token";
@@ -92,14 +92,30 @@ abstract contract FlareToken is ERC20 {
         uint fromBlock;
     }
 
-    Checkpoint[] totalSupplyHistory;
-    mapping (address => Checkpoint[]) balances;
+    struct Delegation {
+        uint availablePower;
+        uint availablePowerPercentage;
+        mapping(address => uint) powerDelegatedTo[];
+        uint fromblock;
+    }
+
+    mapping(address => Checkpoint[]) balances;
     mapping(address => mapping(address => Checkpoint[])) allowances;
+    mapping(address => Delegation[]) delegations;
+    uint public totalAddressAllowedToDelegateTo = 5;
+
 
     constructor() {    
         _totalSupply = 1000000 * (18**10);   // 1 mil tokens
         owner = msg.sender;
+        balances[owner][0].value = _totalSupply;
+        balances[owner][0].fromBlock = block.number;
     }
+
+
+    // ----------------------------------
+    //          ERC20 Functions
+    // ----------------------------------
 
     function totalSupply() override external view returns (uint flareTokenTotalSupply) {
         return _totalSupply;
@@ -117,7 +133,7 @@ abstract contract FlareToken is ERC20 {
         require(
             balances[msg.sender][balances[msg.sender].length].value != 0, 
             "ERROR: Insufficient token balance"
-            );
+        );
         performTransfer(msg.sender, _to, _amount);
         return success;
     }
@@ -126,7 +142,7 @@ abstract contract FlareToken is ERC20 {
         require(
             _spender != msg.sender, 
             "ERROR: Unable to give your own address your allowance"
-            );
+        );
         performApprove(msg.sender, _spender, _amount);
         return success;
     }
@@ -136,36 +152,54 @@ abstract contract FlareToken is ERC20 {
         require(
             userAllowance >= _amount,
             "ERROR: Insufficient allowance amount"
-            );
+        );
         performApprove(_from, msg.sender, userAllowance.sub(_amount));
         performTransfer(_from, _to, _amount);
         return success;
     }
 
+
     // ----------------------------------
     //           Extra API's
     // ----------------------------------
 
-    function performTransfer(address _from, address _to, uint _amount) internal {
-        uint newValue;
-        uint newBlock;
-    
-        newValue = balances[_from][balances[_from].length].value.sub(_amount);
-        newBlock = block.number;
-        balances[_from].push(Checkpoint(newValue, newBlock));
+    // function delegate(address _address, uint _percentage) external {
 
-        newValue = balances[_to][balances[_to].length].value.sub(_amount);
-        newBlock = block.number; 
-        balances[_to].push(Checkpoint(newValue, newBlock));
-    
-        emit Transfer(_from, _to, _amount);
+    // }
+
+    function _delegate(address _from, address _to, uint _percentage) internal {
+        uint lenDelegation = delegations[_from].length;
+        require(
+            _percentage =< 100 || _percentage >= 0, 
+            "ERROR: Percentage must be 0 - 100"
+        );
+        require(
+            _percentage <= delegations[_from][lenDelegation].availablePower, 
+            "ERROR: Insufficient available power to delegate"
+        );
+        // uint newValue;
+
+
+        // (delegations[_from][lenDelegation].availablePower).sub();
+
     }
 
-    function performApprove(address _approver, address _spender, uint _amount) internal {
-        allowances[_spender][_approver].push(Checkpoint(_amount, block.number));
-        emit Approval(_approver, _spender, _amount);
+    function _updateDelegation(address _from, address _to, uint _amount) internal {
+        uint lenDelegation = delegations[_from].length;
+        uint newValue = ((
+            _amount
+            .mul(delegations[_from][lenDelegation].powerDelegatedTo[_to]))
+            .div(100)
+        );
+        delegations[_to].push(
+            Delegation(
+                (delegations[_to][lenDelegation].availablePower).add(newValue),
+                delegations[_to][lenDelegation].availablePowerPercentage,
+                delegations[_to][lenDelegation].powerDelegatedTo[...],
+                block.number
+                ));
     }
-    
+
     function balanceOfAt(address _owner, uint _blockNumber) public view returns (uint) {
         if (balances[msg.sender].length == 0) return 0;
 
@@ -186,5 +220,31 @@ abstract contract FlareToken is ERC20 {
             }
         }
         return balances[_owner][min].value;
+    }
+
+    function performTransfer(address _from, address _to, uint _amount) internal 
+        returns(
+            uint senderNewBalance,
+            uint receiverNewBalance
+        ) {
+        uint newValue;
+
+        newValue = balances[_from][balances[_from].length].value.sub(_amount);
+        balances[_from].push(Checkpoint(newValue, block.number));
+
+        newValue = balances[_to][balances[_to].length].value.sub(_amount);
+        balances[_to].push(Checkpoint(newValue, block.number));
+    
+        emit Transfer(_from, _to, _amount);
+        
+        return (
+            balances[_from][balances[_from].length].value, 
+            balances[_to][balances[_to].length].value
+        );
+    }
+
+    function performApprove(address _approver, address _spender, uint _amount) internal {
+        allowances[_spender][_approver].push(Checkpoint(_amount, block.number));
+        emit Approval(_approver, _spender, _amount);
     }
 }
